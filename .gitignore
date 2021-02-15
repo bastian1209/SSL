@@ -1,0 +1,11 @@
+save
+log
+linear
+dataset
+.ipynb_checkpoints
+__pycache__
+.vscode
+configs/__pycache__
+*.pkl
+.ipynb
+viz
