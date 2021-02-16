@@ -9,7 +9,7 @@ from encoder import ResNet_SL
 from utils import load_ssl_model, load_sl_model, save_model, adjust_learning_rate
 from utils import  AverageMeter, MetricLogger, accuracy, get_resume_info, Value, get_sl_model
 from data import get_dataset, get_loader
-from augment import base_augment
+from data import base_augment
 from datetime import datetime
 import time
 from torchvision import datasets, transforms
@@ -197,6 +197,7 @@ if __name__ == "__main__":
         val_loader = DataLoader(val_dataset, batch_size=config.train.batch_size, shuffle=True, drop_last=True)
         device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
         model_sl = get_sl_model(args.trained_path, config.model.arch, config.dataset.name, config.dataset.num_classes, config.method, eval_only=args.eval_only)
+        pr
         acc = eval(model_sl, val_loader)
         experiment_name = args.trained_path.split('/')[2]
         print('{} - linear eval performance : {:.2f}'.format(experiment_name, acc.cpu().item()))
