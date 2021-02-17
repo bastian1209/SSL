@@ -165,10 +165,10 @@ def main_worker(gpu, num_gpus_per_node, config, args):
     # resume
     if config.train.resume:
         print('resuming train...')
-        if args.gpu is None:
-            ckpt = torch.load(config.train.resume)
+        if not args.gpu:
+            ckpt = torch.load(config.train.resume, map_location=torch.device('cpu'))
         else:
-            map_location = "cuda:{}".format(args.gpu)
+            map_location = torch.device('cpu')
             ckpt = torch.load(config.train.resume, map_location=map_location)
         
         model.load_state_dict(ckpt['model'])

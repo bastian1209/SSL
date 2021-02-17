@@ -7,5 +7,5 @@ __pycache__
 .vscode
 configs/__pycache__
 *.pkl
-.ipynb
+*.ipynb
 viz
