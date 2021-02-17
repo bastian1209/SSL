@@ -196,10 +196,10 @@ class SimCLR(nn.Module):
          
         self.ssl_feat_dim = config.model.ssl_feature_dim
         encoder_params = {'BN' : config.model.bn_encoder, 'norm_layer' : None, 'is_cifar' : 'cifar' in config.dataset.name}
-        self.encoder = ResNet_SSL(config.model.arch, config.model.head, 
-                                  encoder_params=encoder_params, ssl_feat_dim=self.ssl_feat_dim, bn_mlp=config.model.bn_proj)
+        # self.encoder = ResNet_SSL(config.model.arch, config.model.head, 
+        #                           encoder_params=encoder_params, ssl_feat_dim=self.ssl_feat_dim, bn_mlp=config.model.bn_proj)
         # this should be commented out 
-        # self.encoder = ResNet_SimSiam(arch_name=config.model.arch, encoder_params=encoder_params, ssl_feat_dim=2048, bn_mlp=config.model.bn_proj, regular_pred=False)
+        self.encoder = ResNet_SimSiam(arch_name=config.model.arch, encoder_params=encoder_params, ssl_feat_dim=2048, bn_mlp=config.model.bn_proj, regular_pred=False)
         
     def forward(self, view_1, view_2):
         batch_size = self.config.train.batch_size
@@ -300,25 +300,25 @@ class BYOL(nn.Module):
             self.ssl_feat_dim = config.model.ssl_feature_dim
             
         encoder_params = {'BN' : config.model.bn_encoder, 'norm_layer' : config.model.normalize, 'is_cifar' : 'cifar' in config.dataset.name}
-        self.online_network = ResNet_SSL(config.model.arch, config.model.head, 
-                                         encoder_params=encoder_params, 
-                                         ssl_feat_dim=self.ssl_feat_dim, hidden_double=True, bn_mlp=config.model.bn_proj)
-        self.target_network = ResNet_SSL(config.model.arch, config.model.head, 
-                                         encoder_params=encoder_params,
-                                         ssl_feat_dim=self.ssl_feat_dim, hidden_double=True, bn_mlp=config.model.bn_proj)
+        # self.online_network = ResNet_SSL(config.model.arch, config.model.head, 
+        #                                  encoder_params=encoder_params, 
+        #                                  ssl_feat_dim=self.ssl_feat_dim, hidden_double=True, bn_mlp=config.model.bn_proj)
+        # self.target_network = ResNet_SSL(config.model.arch, config.model.head, 
+        #                                  encoder_params=encoder_params,
+        #                                  ssl_feat_dim=self.ssl_feat_dim, hidden_double=True, bn_mlp=config.model.bn_proj)
         
         # this should be commented out
-        # self.online_network = ResNet_SimSiam(arch_name=config.model.arch, encoder_params=encoder_params, ssl_feat_dim=2048, bn_mlp=config.model.bn_proj, 
-        #                                      regular_pred=False)
-        # self.target_network = ResNet_SimSiam(arch_name=config.model.arch, encoder_params=encoder_params, ssl_feat_dim=2048, bn_mlp=config.model.bn_proj, 
-        #                                      regular_pred=False)
+        self.online_network = ResNet_SimSiam(arch_name=config.model.arch, encoder_params=encoder_params, ssl_feat_dim=2048, bn_mlp=config.model.bn_proj, 
+                                             regular_pred=False)
+        self.target_network = ResNet_SimSiam(arch_name=config.model.arch, encoder_params=encoder_params, ssl_feat_dim=2048, bn_mlp=config.model.bn_proj, 
+                                             regular_pred=False)
         
         self._init_encoders()
         
         hidden = self.online_network.proj_head.fc1.out_features
         # this should be commented out
-        # self.predictor = MLPhead(2048, 2048, 512, bn_mlp=config.model.bn_pred)
-        self.predictor = MLPhead(self.ssl_feat_dim, self.ssl_feat_dim, hidden=hidden, bn_mlp=config.model.bn_pred)
+        self.predictor = MLPhead(2048, 2048, 512, bn_mlp=config.model.bn_pred)
+        # self.predictor = MLPhead(self.ssl_feat_dim, self.ssl_feat_dim, hidden=hidden, bn_mlp=config.model.bn_pred)
     
     def _init_encoders(self):
         for param_online, param_target in zip(self.online_network.parameters(), self.target_network.parameters()):
