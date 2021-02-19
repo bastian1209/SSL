@@ -5,6 +5,7 @@ import torch.distributed as dist
 import numpy as np
 from encoder import ResNet_SSL, ResNet_SimSiam, MLPhead
 from utils import schedule_byol_tau, concat_all_gather
+import faiss
 
 
 def get_sscl_method(method_name="moco"):
@@ -378,15 +379,6 @@ class HSA(nn.Module):
     def forward(self, view_1, view_2):
         raise NotImplementedError
     
-    
-class CAST(nn.Module):
-    def __init__(self, config):
-        self.config = config
-        super(CAST, self).__init__()
-    
-    def forward(self, view_1, view_2):
-        raise NotImplementedError
-
 
 #####################################################################################################################################################
 ###################################################################### My Idea ######################################################################
@@ -557,57 +549,34 @@ class MoCLR(nn.Module):
         elif self.option == 'siamese':
             raise NotImplementedError
         
-        
-class PseudoCLR(nn.Module):
+ 
+class NegCL(nn.Module):
     def __init__(self, config):
-        super(PseudoCLR, self).__init__()
+        super(NegCL, self).__init__()
         self.config = config
-        self.K = config.train.num_neg
-        self.T = config.train.temperature
-        self.C = config.train.num_pseudo_class
-        self.ssl_feat_dim = config.train.ssl_feature_dim
-        
-        encoder_params = {'BN' : True, 'norm_layer' : None, 'is_cifar' : 'cifar' in config.dataset.name}
-        self.encoder = ResNet_SSL(arch_name=config.model.arch, encoder_params=encoder_params, ssl_feat_dim=self.ssl_feat_dim, bn_mlp=config.model.bn_proj)
-        
-    def forward(self, x):
-        raise NotImplementedError
-    
-    def cluster_minibatch(self, z):
-        raise NotImplementedError
-    
-    def find_near_center(self):
-        raise NotImplementedError
-    
-    
-class SimTTUR(nn.Module):
-    def __init__(self, config):
-        super(SimTTUR, self).__init__()
-        self.config = config 
-        self.ssl_feat_dim = config.model.ssl_feature_dim
+        self.option = config.train.negcl_option
+        self.num_cluster = config.trian.num_cluster
         
         encoder_params = {'BN' : config.model.bn_encoder, 'norm_layer' : None, 'is_cifar' : 'cifar' in config.dataset.name}
-        self.encoder_fast = ResNet_SSL(config.model.arch, config.model.head, encoder_params=encoder_params, ssl_feat_dim=self.ssl_feat_dim, bn_mlp=config.model.bn_proj)
-        self.encoder_slow = ResNet_SSL(config.model.arch, config.model.head, encoder_params=encoder_params, ssl_feat_dim=self.ssl_feat_dim, bn_mlp=config.model.bn_proj)
-        
-        feat = 512 if config.model.arch == 'resnet18' else 2048
-        self.predictor = MLPhead(in_features=self.ssl_feat_dim, hidden=feat, out_features=self.ssl_feat_dim, bn_mlp=config.model.bn_pred)
-        
+        self.encoder = ResNet_SSL(arch_name=config.model.arch, encoder_params=encoder_params, 
+                                  ssl_feat_dim=config.model.ssl_feature_dim, bn_mlp=config.model.bn_proj)
+        if self.option == 'clhead':
+            self.cluster_head = nn.Sequential(
+                MLPhead(in_features=config.model.ssl_feature_dim, out_features=self.num_cluster, hidden=config.model.ssl_feature_dim),
+                nn.Softmax(dim=1)
+            )
+        else:
+            self.cluster_fucntion = faiss.Clustering
+    
     def forward(self, view_1, view_2):
-        z_1_fast = self.encoder_fast(view_1)
-        z_2_pred_fast = F.normalize(self.predictor(z_1_fast), dim=1)
-        z_2_slow = self.encoder_slow(view_2)
-        z_1_pred_slow = F.normalize(self.predictor(z_2_slow), dim=1)
+        z_1 = self.encoder(view_1)
+        z_2 = self.encoder(view_2)
         
-        z_2_fast = self.encoder_fast(view_2)
-        z_1_pred_fast = F.normalize(self.predictor(z_2_fast), dim=1)
-        z_1_slow = self.encoder_slow(view_1)
-        z_2_pred_slow = F.normalize(self.predictor(z_1_slow), dim=1)
-        
-        loss = -0.25 * ((z_2_pred_fast * z_2_slow.detach()).sum(dim=-1) + (z_1_pred_fast * z_1_slow.detach()).sum(dim=-1) 
-                        + (z_2_pred_slow * z_2_fast.detach()).sum(dim=-1) + (z_1_pred_slow * z_2_fast.detach()).sum(dim=-1))
-        
-        return loss
-        
-        
+        if self.option == 'clhead':
+            c_1 = self.cluster_head(z_1)
+            c_2 = self.cluster_head(z_2)
+        else:
+            batch_size = z_1.shape[0]
+            clus = self.cluster_fucntion(batch_size, self.num_cluster)
+            
         

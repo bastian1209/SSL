@@ -66,6 +66,8 @@ parser.add_argument('--use_wass', type=lambda x : x.lower() == 'true', default=F
 parser.add_argument('--use_neg_wass', type=lambda x : x.lower() == 'true', default=False)
 parser.add_argument('--moclr_option', type=str, default='contrast')
 parser.add_argument('--pos_momentum_full', type=lambda x : x.lower() == 'true', default=False)
+parser.add_argument('--negcl_option', type=str, default='clhead')
+parser.add_argument('--num_cluster', type=int, default=10)
 # parser.add_argument('--num_pseudo_class', type=int, default=10)
 
 def main(config, args):

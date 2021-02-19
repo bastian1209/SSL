@@ -88,6 +88,8 @@ config.train.use_wass = False
 config.train.use_neg_wass = False
 config.train.moclr_option = 'contrast'
 config.train.pos_momentum_full = False
+config.train.negcl_option = 'clhead' # or 'faiss'
+config.train.num_cluster = 10
 # config.train.num_pseudo_class = 10
 # config.train.beta = 2z
 
@@ -209,6 +211,8 @@ def match_config_with_args(config, args):
     config.train.use_neg_wass = args.use_neg_wass
     config.train.moclr_option = args.moclr_option
     config.train.pos_momentum_full = args.pos_momentum_full
+    config.train.negcl_option = args.negcl_option
+    config.train.num_cluster = args.num_cluster
     # config.train.num_pseudo_class = args.num_pseudo_class
     
     config.model.arch = args.arch
