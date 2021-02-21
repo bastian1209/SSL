@@ -25,7 +25,7 @@ def get_dataset(config, mode='train', multiview=True):
     root = config.dataset.root
     name = config.dataset.name
     dataset_path = os.path.join(root, name, mode)
-    
+        
     if mode.startswith('linear'):
         dataset_path = os.path.join(root, name, 'train')
     
@@ -34,7 +34,7 @@ def get_dataset(config, mode='train', multiview=True):
     else:
         transform = base_augment(config, mode=mode)
     
-    if name == 'ImageNet_100':
+    if name.startwith('ImageNet'):
         dataset = datasets.ImageFolder(dataset_path, transform=transform)
         
     if name.startswith('cifar'):
@@ -66,7 +66,21 @@ class MultiviewTransform:
 
 def base_augment(config, mode='train'):
     img_size = config.dataset.img_size[0]
-    crop = transforms.RandomResizedCrop(size=img_size, scale=(0.2, 1.))
+    
+    if mode != 'val':
+        crop = transforms.RandomResizedCrop(size=img_size, scale=(0.2, 1.))
+    else:
+        if config.dataset.name.startswith('cifar'):
+            resize = 40
+            orig_size = 32
+        elif config.dataset.name.startswith('ImageNet'):
+            resize = 256
+            orig_size = 224
+        crop = transforms.Compose([
+            transforms.Resize(resize),
+            transforms.CenterCrop(orig_size)
+        ])
+        
     flip = transforms.RandomHorizontalFlip()
     color_jitter = transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8) # simclr -> 0.4, 0.4, 0.4, 0.2
     gray_scale = transforms.RandomGrayscale(0.2)

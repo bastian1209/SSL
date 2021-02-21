@@ -36,6 +36,7 @@ parser.add_argument('--epochs', type=int, default=60)
 parser.add_argument('--trained-path', type=str)
 parser.add_argument('--method', type=str)
 parser.add_argument('--resume', type=str, default=None)
+parser.add_argument('--num_workers', type=int, default=16)
 args = parser.parse_args()
 
 
@@ -106,6 +107,7 @@ if __name__ == "__main__":
     config.model.arch = args.arch
     config.dataset.name = args.data
     config.dataset.num_classes = args.num_classes
+    config.system.num_workers = args.num_workers
     if config.dataset.name.startswith('cifar'):
         config.dataset.img_size = [32, 32, 3]
     
@@ -127,16 +129,19 @@ if __name__ == "__main__":
         train_dataset = get_dataset(config, mode='linear', multiview=False)
         train_loader = get_loader(config, train_dataset)
         
-        normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225])
-        val_dataset = datasets.CIFAR10(root='./dataset', train=False, download=True,
-                                       transform=transforms.Compose([
-                                            transforms.Resize(40),
-                                            transforms.CenterCrop(32),
-                                            transforms.ToTensor(),
-                                            normalize,
-                                        ]))
-        val_loader = DataLoader(val_dataset, batch_size=config.train.batch_size, shuffle=True, drop_last=True)
+        if config.dataset.name != 'ImageNet_100':
+            val_dataset = get_dataset(config, mode='val', multiview=False)
+            val_loader = get_loader(config, val_dataset)
+            
+        # val_dataset = datasets.CIFAR10(root='./dataset', train=False, download=True,
+        #                                transform=transforms.Compose([
+        #                                     transforms.Resize(resize),
+        #                                     transforms.CenterCrop(orig_size),
+        #                                     transforms.ToTensor(),
+        #                                     normalize,
+        #                                 ]))
+        # val_loader = DataLoader(val_dataset, batch_size=config.train.batch_size, num_workers=config.system.num_workers, 
+        #                         shuffle=True, drop_last=True)
         
         model_sl = get_sl_model(args.model_path, config.model.arch, config.dataset.name, 
                                 config.dataset.num_classes, config.method, bn_encoder=config.model.bn_encoder)
@@ -159,7 +164,7 @@ if __name__ == "__main__":
         #     scheduler = optim.lr_scheduler.MultiStepLR(optimizer, config.train.milestones, gamma=0.2)
         criterion = nn.CrossEntropyLoss()
 
-        for epoch in range(config.train.start_epoch, train_epochs):
+        for epoch in range(0, train_epochs):
             adjust_learning_rate(optimizer, epoch + 1, config, gamma=0.1)
             epoch_start = time.time()
             train_linear_one_epoch(train_loader, model_sl, criterion, optimizer, config, device)
@@ -174,9 +179,10 @@ if __name__ == "__main__":
                               'arch' : config.model.arch}
                 save_model(state_dict, filename)
                 print("####################### model saved at {} #######################".format(filename))
-            val_acc = eval(model_sl, val_loader)
-            print('\nEPOCH {} validation accuracy : {:.2f}\n'.format(epoch + 1, val_acc.cpu().item()))
-            print()
+            if config.dataset.name != 'ImageNet_100':    
+                val_acc = eval(model_sl, val_loader)
+                print('\nEPOCH {} validation accuracy : {:.2f}\n'.format(epoch + 1, val_acc.cpu().item()))
+                print()
 
         filename = os.path.join(config.system.save_dir, "{}_final.pth.tar".format(config.model.arch))
         save_model(state_dict, filename)
