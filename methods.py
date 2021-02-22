@@ -17,12 +17,12 @@ def get_sscl_method(method_name="moco"):
         return BYOL
     elif method_name == 'simsiam':
         return SimSiam
-    elif method_name == 'simttur':
-        return SimTTUR
     elif method_name == 'disccon':
         return DiscCon
     elif method_name == 'moclr':
         return MoCLR
+    elif method_name == 'negcl':
+        return NegCL
 
 
 def EqCo(temperature, K, alpha):
@@ -60,18 +60,18 @@ class MoCo(nn.Module):
             
         self.ssl_feat_dim = config.model.ssl_feature_dim
         encoder_params = {'BN' : config.model.bn_encoder, 'norm_layer' : config.model.normalize, 'is_cifar' : 'cifar' in config.dataset.name}
-        self.query_encoder = ResNet_SSL(config.model.arch, config.model.head, 
-                                      encoder_params=encoder_params, ssl_feat_dim=self.ssl_feat_dim, bn_mlp=config.model.bn_proj)
-        self.key_encoder = ResNet_SSL(config.model.arch, config.model.head, 
-                                      encoder_params=encoder_params, ssl_feat_dim=self.ssl_feat_dim, bn_mlp=config.model.bn_proj)
+        # self.query_encoder = ResNet_SSL(config.model.arch, config.model.head, 
+        #                               encoder_params=encoder_params, ssl_feat_dim=self.ssl_feat_dim, bn_mlp=config.model.bn_proj)
+        # self.key_encoder = ResNet_SSL(config.model.arch, config.model.head, 
+        #                               encoder_params=encoder_params, ssl_feat_dim=self.ssl_feat_dim, bn_mlp=config.model.bn_proj)
         # this should be commented out
-        # self.query_encoder = ResNet_SimSiam(arch_name=config.model.arch, encoder_params=encoder_params, ssl_feat_dim=2048, bn_mlp=config.model.bn_proj, regular_pred=False)
-        # self.key_encoder = ResNet_SimSiam(arch_name=config.model.arch, encoder_params=encoder_params, ssl_feat_dim=2048, bn_mlp=config.model.bn_proj, regular_pred=False)
+        self.query_encoder = ResNet_SimSiam(arch_name=config.model.arch, encoder_params=encoder_params, ssl_feat_dim=2048, bn_mlp=config.model.bn_proj, regular_pred=False)
+        self.key_encoder = ResNet_SimSiam(arch_name=config.model.arch, encoder_params=encoder_params, ssl_feat_dim=2048, bn_mlp=config.model.bn_proj, regular_pred=False)
         
         self._init_encoders()
         self.register_buffer("neg_queue", torch.randn(self.ssl_feat_dim, self.K)) # [dim, K]
         # this should be commented out
-        # self.register_buffer("neg_queue", torch.randn(2048, self.K))
+        self.register_buffer("neg_queue", torch.randn(2048, self.K))
         self.neg_queue = F.normalize(self.neg_queue, dim=0)
         self.register_buffer("queue_pointer", torch.zeros(1, dtype=torch.long))
     
@@ -555,28 +555,120 @@ class NegCL(nn.Module):
         super(NegCL, self).__init__()
         self.config = config
         self.option = config.train.negcl_option
-        self.num_cluster = config.trian.num_cluster
+        self.ssl_feat_dim = config.model.ssl_feature_dim
         
         encoder_params = {'BN' : config.model.bn_encoder, 'norm_layer' : None, 'is_cifar' : 'cifar' in config.dataset.name}
         self.encoder = ResNet_SSL(arch_name=config.model.arch, encoder_params=encoder_params, 
                                   ssl_feat_dim=config.model.ssl_feature_dim, bn_mlp=config.model.bn_proj)
         if self.option == 'clhead':
             self.cluster_head = nn.Sequential(
-                MLPhead(in_features=config.model.ssl_feature_dim, out_features=self.num_cluster, hidden=config.model.ssl_feature_dim),
+                MLPhead(in_features=config.model.ssl_feature_dim, out_features=self.num_clusters, hidden=config.model.ssl_feature_dim),
                 nn.Softmax(dim=1)
             )
-        else:
-            self.cluster_fucntion = faiss.Clustering
+        hidden = 512 if config.dataset.name.startswith('cifar') else 2048
+        self.predictor = MLPhead(self.ssl_feat_dim, self.ssl_feat_dim, hidden=hidden, bn_mlp=config.model.bn_pred)
+    
+    @torch.no_grad()
+    def gather_and_broadcast(self, z):
+        batch_size_this = z.shape[0]
+        z_gather = concat_all_gather(z)
+        # batch_size_all = z_gather.shape[0]
+        # num_gpus = int(batch_size_all // batch_size_all)
+        centroids = run_kmeans(z_gather.detach().cpu().numpy(), self.config)
+        
+        # idx = torch.arange(batch_size_all).cuda()
+        for i in range(len(self.config.train.num_clusters)):
+            dist.broadcast(centroids[i], src=0)
+
+        return centroids
     
     def forward(self, view_1, view_2):
         z_1 = self.encoder(view_1)
         z_2 = self.encoder(view_2)
         
+        z_1_pred = F.normalize(self.predictor(z_2), dim=1)
+        z_2_pred = F.normalize(self.predictor(z_1), dim=1)
+        loss_pos = (2 - 2 * (z_1_pred * z_1.detach()).sum(dim=-1)) + (2 - 2 * (z_2_pred * z_2.detach()).sum(dim=-1))
+                 
         if self.option == 'clhead':
             c_1 = self.cluster_head(z_1)
             c_2 = self.cluster_head(z_2)
         else:
-            batch_size = z_1.shape[0]
-            clus = self.cluster_fucntion(batch_size, self.num_cluster)
+            # z_1_gather = concat_all_gather(z_1)
+            # centroids_1 = run_kmeans(z_1_gather.detach().cpu().numpy(), self.config)
+            # z_2_gather = concat_all_gather(z_2)
+            # centroids_2 = run_kmeans(z_2_gather.detach().cpu().numpy(), self.config)
             
+            centroids_1 = self.gather_and_broadcast(z_1)
+            centroids_2 = self.gather_and_broadcast(z_2)
+            
+            # residual_12 = torch.cat([centroids.mean(dim=0, keepdim=True) for centroids in centroids_2], dim=0) - z_1.unsqueeze(1) # [batch_size, 2, dim]
+            # residual_21 = torch.cat([centorids.mean(dim=0, keepdim=True) for centroids in centroids_1], dim=0) - z_2.unsqueeze(1) # [batch_size, 2, dim]
+            residual_12 = torch.cat([centroids.mean(dim=0, keepdim=True) for centroids in centroids_2], dim=0).mean(dim=0, keepdim=True) - z_1 # [batch_size, 2, dim]
+            residual_21 = torch.cat([centroids.mean(dim=0, keepdim=True) for centroids in centroids_1], dim=0).mean(dim=0, keepdim=True) - z_2 # [batch_size, 2, dim]
+            residual_12 = F.normalize(residual_12, dim=1)
+            residual_21 = F.normalize(residual_21, dim=1)
+            residual_12_pred = F.normalize(self.predictor(z_1), dim=1)
+            residual_21_pred = F.normalize(self.predictor(z_2), dim=1)
+            
+            loss_neg = (2 - 2 * (residual_12_pred * residual_12.detach()).sum(dim=-1)) + (2 - 2 * (residual_21_pred * residual_21.detach()).sum(dim=-1))
         
+        loss = loss_pos + loss_neg
+
+        return loss
+    
+
+def run_kmeans(x, config):
+    # results = {'im2cluster' : [], 'centroids' : [], 'density' : []}
+    results = []
+     
+    for seed, num_cluster in enumerate(config.train.num_clusters):
+        dim = x.shape[1]
+        k = int(num_cluster)
+        
+        clus = faiss.Clustering(dim, k)
+        clus.verbose = False
+        clus.niter = 3
+        clus.nredo = 1
+        clus.seed = seed
+        clus.max_points_per_centroid = 50
+        clus.min_points_per_centroid = 5
+        
+        res = faiss.StandardGpuResources()
+        cfg = faiss.GpuIndexFlatConfig()
+        cfg.use_float16 = False 
+        cfg.device = config.system.gpu
+        index = faiss.GpuIndexFlatL2(res, dim, cfg)
+        
+        clus.train(x, index)
+        distances, indices = index.search(x, 1)
+        # im2cluster = [int(ind[0]) for ind in indices]
+        
+        centroids = faiss.vector_to_array(clus.centroids).reshape(k, dim)
+        
+        # dist2cluster = [[] for c in range(k)]
+        # for image_index, cluster_index in enumerate(im2cluster):
+        #     dist2cluster[cluster_index].append(distances[image_index][0])
+        
+        # density = np.zeros(k)
+        # for i, dist in enumerate(dist2cluster):
+        #     if len(dist) > 1:
+        #         d = (np.array(dist) ** 0.5).mean() / np.log(len(dist) + 10)
+        #         density[i] = d
+                
+        # dmax = density.max()
+        # for i, dist in enumerate(dist2cluster):
+        #     if len(dist) <= 1:
+        #         density[i] = dmax
+        # density = density.clip(np.percentile(density, 10), np.percentile(density, 90))
+        
+        centroids = torch.Tensor(centroids).cuda()
+        centroids = F.normalize(centroids, dim=1)             
+        # im2cluster = torch.LongTensor(im2cluster).cuda()
+        # density = torch.Tensor(density).cuda()
+        
+        # results['im2cluster'].append(im2cluster)
+        results.append(centroids)
+        # results['density'].append(density)
+        
+    return results

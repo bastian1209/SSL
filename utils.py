@@ -93,6 +93,9 @@ def load_ssl_model(ckpt_path, method='moco'):
     
     elif method == 'moclr':
         prefix = 'module.encoder.'
+        
+    elif method == 'negcl':
+        prefix = 'module.encoder'
     
     for k, v in model_ssl_dict.items():
         if k.startswith(prefix):

@@ -34,7 +34,7 @@ def get_dataset(config, mode='train', multiview=True):
     else:
         transform = base_augment(config, mode=mode)
     
-    if name.startwith('ImageNet'):
+    if name.startswith('ImageNet'):
         dataset = datasets.ImageFolder(dataset_path, transform=transform)
         
     if name.startswith('cifar'):

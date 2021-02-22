@@ -66,8 +66,8 @@ parser.add_argument('--use_wass', type=lambda x : x.lower() == 'true', default=F
 parser.add_argument('--use_neg_wass', type=lambda x : x.lower() == 'true', default=False)
 parser.add_argument('--moclr_option', type=str, default='contrast')
 parser.add_argument('--pos_momentum_full', type=lambda x : x.lower() == 'true', default=False)
-parser.add_argument('--negcl_option', type=str, default='clhead')
-parser.add_argument('--num_cluster', type=int, default=10)
+parser.add_argument('--negcl_option', type=str, default='faiss') # of 'clhead;
+parser.add_argument('--num_clusters', default=[10, 20], nargs='+', type=int)
 # parser.add_argument('--num_pseudo_class', type=int, default=10)
 
 def main(config, args):
@@ -128,7 +128,7 @@ def main_worker(gpu, num_gpus_per_node, config, args):
             nn.SyncBatchNorm.convert_sync_batchnorm(model.online_network)
             nn.SyncBatchNorm.convert_sync_batchnorm(model.target_network)
             nn.SyncBatchNorm.convert_sync_batchnorm(model.predictor)
-        elif (config.method == 'simsiam'):
+        elif (config.method == 'simsiam') or (config.method == 'negcl'):
             nn.SyncBatchNorm.convert_sync_batchnorm(model.encoder)
             nn.SyncBatchNorm.convert_sync_batchnorm(model.predictor)
             
@@ -189,10 +189,10 @@ def main_worker(gpu, num_gpus_per_node, config, args):
         train_sampler=None
     train_loader = get_loader(config, train_dataset, train_sampler) 
     
-    if config.method != 'byol':
-        criterion = nn.CrossEntropyLoss().cuda(config.system.gpu)
-    else:
+    if (config.method == 'byol') or (config.method == 'simsiam') or (config.method == 'negcl'):
         criterion = None
+    else:
+        criterion = nn.CrossEntropyLoss().cuda(config.system.gpu)
         
     # run train
     for epoch in range(config.train.start_epoch, config.train.epochs):
@@ -236,7 +236,7 @@ def main_worker(gpu, num_gpus_per_node, config, args):
 def train_one_epoch(train_loader, model, criterion, optimizer, writer, epoch, total_step, config):
     log_header = 'EPOCH {}'.format(epoch)
     losses = AverageMeter('Loss', fmt=':.4f')
-    if (config.method != 'byol') and (config.method != 'simsiam'):
+    if (config.method != 'byol') and (config.method != 'simsiam') and (config.method != 'negcl'):
         top1 = AverageMeter('Acc1', fmt=':4.2f')
         top5 = AverageMeter('Acc5', fmt=':4.2f')
     if config.method == 'byol':
@@ -247,7 +247,7 @@ def train_one_epoch(train_loader, model, criterion, optimizer, writer, epoch, to
     
     metric_logger = MetricLogger(delimeter=" | ")
     metric_logger.add_meter(losses)
-    if (config.method != 'byol') and (config.method != 'simsiam'):
+    if (config.method != 'byol') and (config.method != 'simsiam') and (config.method != 'negcl'):
         metric_logger.add_meter(top1)
         metric_logger.add_meter(top5)
     elif config.method == 'byol':
@@ -290,7 +290,7 @@ def train_one_epoch(train_loader, model, criterion, optimizer, writer, epoch, to
                 loss = loss + 0.3 * loss_d
             acc1, acc5 = accuracy(logits, targets, topk=(1, 5))
             
-        elif (config.method == 'byol') or (config.method == 'simsiam'):
+        elif (config.method == 'byol') or (config.method == 'simsiam') or (config.method == 'negcl'):
             loss_pre = model(view_1=images[0], view_2=images[1])
             loss = loss_pre.mean()
         
@@ -318,7 +318,7 @@ def train_one_epoch(train_loader, model, criterion, optimizer, writer, epoch, to
             tau_ = model.module.tau
             metric_logger.update(Loss=loss.detach().cpu().item(), 
                                  Lr=lr_, Tau=tau_)
-        elif config.method == 'simsiam':
+        elif (config.method == 'simsiam') or (config.method == 'negcl'):
             metric_logger.update(Loss=loss.detach().cpu().item(), 
                                  Lr=lr_)
             
@@ -327,7 +327,7 @@ def train_one_epoch(train_loader, model, criterion, optimizer, writer, epoch, to
             metric_logger.update(Temp=t_)
             
         writer.add_scalar('loss', loss.detach().cpu().item(), total_step.val)
-        if (config.method != 'byol') and (config.method != 'simsiam'):
+        if (config.method != 'byol') and (config.method != 'simsiam') and (config.method != 'negcl'):
             writer.add_scalar('top1', acc1.detach().cpu().item(), total_step.val)
         
         optimizer.zero_grad()
